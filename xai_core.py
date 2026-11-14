@@ -362,7 +362,13 @@ def generate_llm_explanation(prediction_results: Dict, api_key: Optional[str] = 
     drops_txt = ", ".join(f"{d:.2f}" for d in drops) if drops else "n/a"
     try:
         from google import genai
-        client = genai.Client(api_key=key)
+        from google.genai import types
+        # Bound each Gemini request and avoid long SDK retry chains in the UI.
+        http_options = types.HttpOptions(
+            timeout=15_000,
+            retry_options=types.HttpRetryOptions(attempts=1),
+        )
+        client = genai.Client(api_key=key, http_options=http_options)
         prompt = f"""
 You are an AI radiological research assistant acting as an educational decision aid for a clinician.
 Summarize ONLY these model outputs (do not invent findings):
@@ -399,8 +405,23 @@ def test_gemini_key(api_key: str, model_name: str = "gemini-3.8-flash") -> Tuple
         return False, "No key entered."
     try:
         from google import genai
-        client = genai.Client(api_key=api_key.strip())
-        resp = client.models.generate_content(model=model_name, contents="Reply with the single word: OK")
+        from google.genai import types
+        # Keep the Streamlit button responsive: one attempt, 15-second timeout.
+        http_options = types.HttpOptions(
+            timeout=15_000,
+            retry_options=types.HttpRetryOptions(attempts=1),
+        )
+        client = genai.Client(api_key=api_key.strip(), http_options=http_options)
+        resp = client.models.generate_content(
+            model=model_name,
+            contents="Reply with the single word: OK",
+            config=types.GenerateContentConfig(
+                http_options=types.HttpOptions(
+                    timeout=15_000,
+                    retry_options=types.HttpRetryOptions(attempts=1),
+                )
+            ),
+        )
         return (True, "Key works.") if (resp.text or "").strip() else (False, "Empty response from Gemini.")
     except Exception as e:
         # google-genai APIError exposes an HTTP status in .code and a safe
