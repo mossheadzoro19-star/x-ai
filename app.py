@@ -161,10 +161,14 @@ def sha(b: bytes, n: int = 10) -> str:
 
 
 @st.cache_resource(show_spinner="Downloading model checkpoint...")
-def _download_checkpoint(url: str, expected_sha256: str = "") -> str:
+def _download_checkpoint(url: str, expected_sha256: str = "", github_token: str = "") -> str:
     """Download a deployment-hosted checkpoint to temporary storage, verifying it when a hash is supplied."""
     target = Path(tempfile.gettempdir()) / "best_densenet121.pth"
-    request = urllib.request.Request(url, headers={"User-Agent": "Chest-Xray-XAI-Streamlit"})
+    headers = {"User-Agent": "Chest-Xray-XAI-Streamlit"}
+    if github_token:
+        headers["Authorization"] = f"Bearer {github_token}"
+        headers["Accept"] = "application/octet-stream"
+    request = urllib.request.Request(url, headers=headers)
     digest = hashlib.sha256()
     with urllib.request.urlopen(request, timeout=180) as response, target.open("wb") as out:
         while True:
@@ -266,16 +270,18 @@ try:
     else:
         deploy_url = ""
         deploy_sha = ""
+        deploy_token = ""
         try:
             deploy_url = str(st.secrets.get("MODEL_WEIGHTS_URL", "") or "").strip()
             deploy_sha = str(st.secrets.get("MODEL_WEIGHTS_SHA256", "") or "").strip()
+            deploy_token = str(st.secrets.get("MODEL_GITHUB_TOKEN", "") or "").strip()
         except Exception:
             pass
         if disk_w.exists():
             chosen_w = disk_w
             model_src = "local folder · best_densenet121.pth"
         elif deploy_url:
-            chosen_w = Path(_download_checkpoint(deploy_url, deploy_sha))
+            chosen_w = Path(_download_checkpoint(deploy_url, deploy_sha, deploy_token))
             model_src = "configured deployment checkpoint"
         else:
             chosen_w = None
