@@ -190,7 +190,7 @@ def _flag(name: str) -> bool:
         return False
 
 
-show_setup = (not _flag("HIDE_SETUP")) or st.query_params.get("admin") == "1"
+show_setup = st.query_params.get("admin") == "1"
 w_up = c_up = None
 key_in = ""
 use_llm = True
@@ -332,7 +332,7 @@ with tab_analyze:
     up = st.file_uploader("Chest X-ray (JPG / PNG)", type=["jpg", "jpeg", "png"], key="xray",
                           disabled=model is None, label_visibility="collapsed")
     if model is None:
-        st.info("Open **⚙ Setup** above and load the model weights first. The upload box unlocks once the model is ready.")
+        st.error("The configured DenseNet-121 checkpoint was not found or could not be loaded. Confirm best_densenet121.pth is beside app.py and restart the app. Admin setup is available by adding ?admin=1 to the URL.")
     elif up is None:
         st.info("Upload a chest X-ray above to begin. Files are processed in memory and never saved.")
     else:
