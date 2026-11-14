@@ -347,7 +347,7 @@ def _fallback_summary(r: Dict, note: str = "") -> str:
 
 
 def generate_llm_explanation(prediction_results: Dict, api_key: Optional[str] = None,
-                             model_name: str = "gemini-3.8-flash") -> str:
+                             model_name: str = "gemini-3.5-flash-lite") -> str:
     key = get_api_key(api_key)
     if not key:
         return _fallback_summary(prediction_results)
@@ -365,7 +365,7 @@ def generate_llm_explanation(prediction_results: Dict, api_key: Optional[str] = 
         from google.genai import types
         # Bound each Gemini request and avoid long SDK retry chains in the UI.
         http_options = types.HttpOptions(
-            timeout=15_000,
+            timeout=45_000,
             retry_options=types.HttpRetryOptions(attempts=1),
         )
         client = genai.Client(api_key=key, http_options=http_options)
@@ -399,7 +399,7 @@ Guardrails:
                                       f"Showing deterministic summary instead.\n\n")
 
 
-def test_gemini_key(api_key: str, model_name: str = "gemini-3.8-flash") -> Tuple[bool, str]:
+def test_gemini_key(api_key: str, model_name: str = "gemini-3.5-flash-lite") -> Tuple[bool, str]:
     """Tiny call to check a key. Returns (ok, message). The key is never logged or stored."""
     if not api_key or not api_key.strip():
         return False, "No key entered."
@@ -408,19 +408,14 @@ def test_gemini_key(api_key: str, model_name: str = "gemini-3.8-flash") -> Tuple
         from google.genai import types
         # Keep the Streamlit button responsive: one attempt, 15-second timeout.
         http_options = types.HttpOptions(
-            timeout=15_000,
+            timeout=45_000,
             retry_options=types.HttpRetryOptions(attempts=1),
         )
         client = genai.Client(api_key=api_key.strip(), http_options=http_options)
         resp = client.models.generate_content(
             model=model_name,
             contents="Reply with the single word: OK",
-            config=types.GenerateContentConfig(
-                http_options=types.HttpOptions(
-                    timeout=15_000,
-                    retry_options=types.HttpRetryOptions(attempts=1),
-                )
-            ),
+            config=types.GenerateContentConfig(max_output_tokens=8),
         )
         return (True, "Key works.") if (resp.text or "").strip() else (False, "Empty response from Gemini.")
     except Exception as e:
