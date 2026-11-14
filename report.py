@@ -2,7 +2,7 @@
 report.py - builds a one-page PDF summary of a single analysis (UI-free, NFR9).
 
 Contains: original X-ray, Grad-CAM overlay, prediction, confidence, usefulness scores,
-explanation text and the disclaimer. No filenames, no patient identifiers, nothing written to disk.
+the disclaimer. No filenames, no patient identifiers, nothing written to disk.
 """
 import io
 import re
@@ -40,10 +40,10 @@ def build_pdf(res: Dict, explanation: str, case_id: str, latency_s: Optional[flo
     c.rect(0, H - 80, W, 80, stroke=0, fill=1)
     c.setFillColor(colors.white)
     c.setFont("Helvetica", 20)
-    c.drawString(m, H - 46, "Chest X-ray XAI - analysis summary")
+    c.drawString(m, H - 46, "x-ai - analysis summary")
     c.setFont("Helvetica", 9)
     c.setFillColor(lime)
-    c.drawString(m, H - 64, f"Case ref {case_id}  |  {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  Team 19, KLE Tech")
+    c.drawString(m, H - 64, f"Case ref {case_id}  |  {datetime.now().strftime('%Y-%m-%d %H:%M')}  |  x-ai")
 
     # images
     y_img = H - 100 - 230
@@ -76,18 +76,6 @@ def build_pdf(res: Dict, explanation: str, case_id: str, latency_s: Optional[flo
         c.setFillColor(grey)
         c.setFont("Helvetica", 8)
         c.drawString(m, y, f"Analysis time {latency_s:.1f} s")
-        y -= 12
-
-    # explanation
-    y -= 8
-    c.setFillColor(forest)
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(m, y, "Explanation")
-    y -= 14
-    c.setFillColor(colors.black)
-    c.setFont("Helvetica", 9)
-    for line in simpleSplit(_plain(explanation), "Helvetica", 9, W - 2 * m)[:28]:
-        c.drawString(m, y, line)
         y -= 12
 
     # disclaimer
