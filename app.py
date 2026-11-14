@@ -396,8 +396,8 @@ with tab_analyze:
                     "- **Usefulness score** here is a *prototype*: it depends only on the (predicted class, closest alternative) pair "
                     "and a transparent hand-written concept table (λ = 0.15, US = CS − λ·C). "
                     "It does **not** change with the image or the heatmap, so do not read it as image-specific clinical truth.\n"
-                    "- **Accuracy context:** measured test accuracy is 73.69% (below the 85% target). Pneumonia is reliable; "
-                    "Normal ↔ Tuberculosis is often confused.\n"
+                    "- **Accuracy context:** see the Model performance tab for metrics from the bundled checkpoint. "
+                    "Review the evaluation-integrity warning before interpreting the reported score.\n"
                     "- The clinician keeps final decision authority.")
 
             # --- probabilities + faithfulness ----------------------------------
