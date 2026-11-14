@@ -347,7 +347,7 @@ def _fallback_summary(r: Dict, note: str = "") -> str:
 
 
 def generate_llm_explanation(prediction_results: Dict, api_key: Optional[str] = None,
-                             model_name: str = "gemini-2.5-flash") -> str:
+                             model_name: str = "gemini-3.8-flash") -> str:
     key = get_api_key(api_key)
     if not key:
         return _fallback_summary(prediction_results)
@@ -393,7 +393,7 @@ Guardrails:
                                       f"Showing deterministic summary instead.\n\n")
 
 
-def test_gemini_key(api_key: str, model_name: str = "gemini-2.5-flash") -> Tuple[bool, str]:
+def test_gemini_key(api_key: str, model_name: str = "gemini-3.8-flash") -> Tuple[bool, str]:
     """Tiny call to check a key. Returns (ok, message). The key is never logged or stored."""
     if not api_key or not api_key.strip():
         return False, "No key entered."
@@ -403,9 +403,30 @@ def test_gemini_key(api_key: str, model_name: str = "gemini-2.5-flash") -> Tuple
         resp = client.models.generate_content(model=model_name, contents="Reply with the single word: OK")
         return (True, "Key works.") if (resp.text or "").strip() else (False, "Empty response from Gemini.")
     except Exception as e:
-        msg = str(e).lower()
-        if any(t in msg for t in ("api key", "api_key", "permission", "401", "403", "invalid")):
-            return False, "Key rejected by Google (invalid or not enabled)."
-        if any(t in msg for t in ("quota", "429", "resource")):
-            return False, "Key looks valid but quota/rate limit was hit."
-        return False, f"Could not reach Gemini ({type(e).__name__})."
+        # google-genai APIError exposes an HTTP status in .code and a safe
+        # service message in .message. Surface that detail so users can tell
+        # authentication, model access, quota, and service/network failures apart.
+        code = getattr(e, "code", None)
+        detail = str(getattr(e, "message", "") or str(e)).strip()
+        detail = detail.replace(api_key.strip(), "[REDACTED]") if api_key and api_key.strip() else detail
+        detail = " ".join(detail.split())[:240]
+        try:
+            code = int(code) if code is not None else None
+        except (TypeError, ValueError):
+            code = None
+
+        if code == 400 or any(t in detail.lower() for t in ("api_key_invalid", "api key not valid")):
+            return False, "Google rejected this API key (HTTP 400). Create or copy a valid Gemini API key in Google AI Studio."
+        if code == 401:
+            return False, "Gemini authentication failed (HTTP 401). Check that this is a Gemini Developer API key, copied completely, and not a Vertex/Agent Platform credential."
+        if code == 403:
+            return False, "Gemini denied access (HTTP 403). Check that the key is enabled for the Gemini API and that the project/API restrictions allow generativelanguage.googleapis.com."
+        if code == 404:
+            return False, f"Gemini model is unavailable to this project (HTTP 404). The app now tests {model_name}; verify model access in Google AI Studio. {detail}"
+        if code == 429:
+            return False, "Gemini rate limit or quota reached (HTTP 429). Check the project's AI Studio rate limits and billing."
+        if code == 503:
+            return False, "Gemini is temporarily overloaded (HTTP 503). Retry later; this is not evidence that the API key is invalid."
+        if code is not None:
+            return False, f"Gemini API returned HTTP {code}: {detail or type(e).__name__}"
+        return False, f"Gemini connection failed ({type(e).__name__}): {detail or 'Check Codespaces network access and retry.'}"
