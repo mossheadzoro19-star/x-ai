@@ -163,7 +163,7 @@ def sha(b: bytes, n: int = 10) -> str:
 @st.cache_resource(show_spinner="Downloading model checkpoint...")
 def _download_checkpoint(url: str, expected_sha256: str = "") -> str:
     """Download a deployment-hosted checkpoint to temporary storage, verifying it when a hash is supplied."""
-    target = Path(tempfile.gettempdir()) / "xai_best_densenet121.pth"
+    target = Path(tempfile.gettempdir()) / "best_densenet121.pth"
     request = urllib.request.Request(url, headers={"User-Agent": "Chest-Xray-XAI-Streamlit"})
     digest = hashlib.sha256()
     with urllib.request.urlopen(request, timeout=180) as response, target.open("wb") as out:
