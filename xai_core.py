@@ -327,24 +327,30 @@ def get_api_key(explicit: Optional[str] = None) -> Optional[str]:
 
 
 def _fallback_summary(r: Dict, note: str = "") -> str:
-    fact, foil = r['fact_class'].capitalize(), r['foil_class'].capitalize()
-    conf, foil_conf = r['confidence'] * 100, r['foil_confidence'] * 100
-    us, cs = r['usefulness']['usefulness_score'], r['usefulness']['contrastive_score']
+    fact = r["fact_class"].capitalize()
+    foil = r["foil_class"].capitalize()
+    conf = r["confidence"] * 100
+    foil_conf = r["foil_confidence"] * 100
+    gap = abs(conf - foil_conf)
+    uncertainty = (
+        "The model's leading categories are close, so this result should be treated as uncertain."
+        if gap < 10 or conf < 70
+        else "The model favoured this category over its closest alternative, but this is not a diagnosis."
+    )
     return (
         f"{note}"
-        f"### Model Decision Support Summary (Non-Diagnostic Prototype)\n\n"
-        f"- **Primary Hypothesis (Fact)**: **{fact}** (Calibrated Confidence: `{conf:.1f}%`)\n"
-        f"- **Closest Competing Differential (Foil)**: **{foil}** (Confidence: `{foil_conf:.1f}%`)\n"
-        f"- **Contrastive Concept Differential**: `{cs:+.2f}` | **Usefulness Score**: `{us:+.2f}`\n\n"
-        f"**Radiological Context & Attribution Notice**:\n"
-        f"The visual overlay indicates anatomical zones in the thoracic cage that drove the DenseNet-121 "
-        f"feature activations toward '{fact}'. This attribution reflects model sensitivity and does not "
-        f"confirm the presence of active pathology. Statistical confidence scores must not be interpreted as "
-        f"calibrated disease likelihoods.\n\n"
-        f"⚠️ **Mandatory Clinical Notice**: This output is strictly for research and education. "
-        f"Formal diagnosis requires comprehensive clinical correlation and review by a board-certified radiologist."
+        f"**AI assessment: {fact} pattern predicted**\n\n"
+        f"The model assigned {conf:.1f}% of its calibrated prediction score to {fact.lower()}. "
+        f"Its closest alternative was {foil.lower()} at {foil_conf:.1f}%. "
+        f"{uncertainty}\n\n"
+        f"**What the highlighted image shows**\n\n"
+        f"The coloured overlay marks image regions that had greater influence on the model's prediction. "
+        f"It shows where the model was sensitive; it does not identify or confirm a medical abnormality.\n\n"
+        f"**For clinical review**\n\n"
+        f"Review the original X-ray alongside the overlay. Interpret this output only as an AI research aid "
+        f"and correlate it with the patient's history, examination and other investigations. "
+        f"A qualified clinician must make the diagnosis."
     )
-
 
 def generate_llm_explanation(prediction_results: Dict, api_key: Optional[str] = None,
                              model_name: str = "gemini-3.5-flash-lite") -> str:
@@ -370,22 +376,31 @@ def generate_llm_explanation(prediction_results: Dict, api_key: Optional[str] = 
         )
         client = genai.Client(api_key=key, http_options=http_options)
         prompt = f"""
-You are an AI radiological research assistant acting as an educational decision aid for a clinician.
-Summarize ONLY these model outputs (do not invent findings):
-- Primary prediction (Fact): {fact} (calibrated confidence {conf:.1f}%)
-- Competing differential (Foil): {foil} (confidence {foil_conf:.1f}%)
-- Contrastive score: {us_d['contrastive_score']:.2f}; Usefulness score: {us_d['usefulness_score']:.2f}
-  (normalised 0-1: {us_d['usefulness_normalized']:.2f})
-- Most discriminating concepts between Fact and Foil: {concepts}
-- Grad-CAM deletion faithfulness (probability drop after removing top 10/20/30% pixels): {drops_txt}
+You write the clinician-facing explanation for a chest X-ray AI research dashboard.
+Write for a busy doctor in plain, concise clinical language. A doctor should understand the output in about 10 seconds.
+You may explain only what the supplied model outputs support. Do not interpret the X-ray yourself and do not invent radiological signs, anatomical locations, symptoms, patient history, or disease evidence.
 
-Guardrails:
-1. Never state or imply that this confirms a diagnosis.
-2. Explicitly say the heatmap reflects model sensitivity, not verified pathology.
-3. Note that confidence scores are statistical estimates, not disease probabilities.
-4. If confidence is below 70% or Fact/Foil are close, say the result is uncertain.
-5. Recommend mandatory review by a physician/radiologist.
-6. Maximum 150 words, plain language, no markdown headings.
+Model outputs:
+- Leading model category: {fact}; calibrated model score: {conf:.1f}%
+- Closest alternative category: {foil}; calibrated model score: {foil_conf:.1f}%
+- Contrastive score: {us_d['contrastive_score']:.2f}; prototype usefulness score: {us_d['usefulness_score']:.2f}
+- Concept-table entries (hand-authored associations, not image-detected findings): {concepts}
+- Grad-CAM deletion probability changes after removing top 10/20/30% highlighted pixels: {drops_txt}
+
+Write exactly these short sections:
+1. "AI assessment" — state which category the model favoured and the closest alternative.
+2. "What influenced the prediction" — explain that the heatmap highlights image regions that influenced the model; do not describe those regions as lesions, consolidation, cavities, infiltrates, or any other pathology.
+3. "Uncertainty" — explain that the score is a model score, not the probability that the patient has the disease. If the leading score is below 70% or the two leading scores are within 10 percentage points, explicitly call the result uncertain.
+4. "For clinical review" — ask the clinician to inspect the original image independently and correlate with clinical history and other investigations.
+
+Rules:
+- Maximum 120 words total.
+- Plain language, short sentences, no ML jargon, no markdown tables.
+- Never state or imply a diagnosis or verified radiological finding.
+- Clearly say the heatmap reflects model sensitivity, not confirmed pathology.
+- The concept table is hand-authored and must never be presented as image evidence.
+- Do not call the confidence score a disease probability.
+- Physician/radiologist retains final decision authority.
 """
         resp = client.models.generate_content(model=model_name, contents=prompt)
         text = (resp.text or "").strip()
