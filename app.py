@@ -9,6 +9,7 @@ Nothing is written to disk except the clinician-ratings CSV (no images, no keys)
 Research prototype - not a diagnostic device.
 """
 import hashlib
+import os
 import io
 import json
 import time
@@ -30,7 +31,7 @@ LOW_CONF = 0.70            # below this -> low-confidence warning
 CLOSE_GAP = 0.20           # top-2 probability gap below this -> "uncertain" banner
 GOOD_LATENCY_S = 10.0      # NFR2
 
-st.set_page_config(page_title="Chest X-ray XAI · Team 19", page_icon="🫁", layout="wide")
+st.set_page_config(page_title="Chest X-ray XAI · Team 19", page_icon="🫁", layout="wide", initial_sidebar_state="collapsed")
 
 # ----------------------------------------------------------------------------
 # Design (Olea-style: Hanken Grotesk, forest + lime, soft rounded cards)
@@ -98,6 +99,19 @@ div[data-testid="stExpander"]{border-radius:18px;border-color:var(--line)}
 .pill.ok{background:var(--lime);border-color:var(--lime);color:var(--ink)}
 .disc{background:#fff;border:1px solid var(--line);border-radius:16px;padding:12px 14px;font:400 12px/150% 'Hanken Grotesk';color:var(--muted)}
 .disc b{color:var(--ink);font-weight:500}
+
+/* force readable text regardless of browser dark mode */
+.stApp,.stApp p,.stApp label,.stApp span,.stApp li,.stApp h1,.stApp h2,.stApp h3,.stApp small,
+[data-testid="stWidgetLabel"] *,[data-testid="stCaptionContainer"] *,[data-testid="stExpander"] summary *{color:var(--ink)}
+.hero,.hero *,.card.dark,.card.dark *{color:#fff!important}
+.hero p{color:#D8DDD3!important}
+.stTabs [aria-selected="true"],.stTabs [aria-selected="true"] *{color:#fff!important}
+.stButton>button,.stDownloadButton>button,.stButton>button *,.stDownloadButton>button *{color:#fff!important}
+.stButton>button:hover *,.stDownloadButton>button:hover *{color:var(--ink)!important}
+div[data-testid="stFileUploader"] button,div[data-testid="stFileUploader"] button *{color:#fff!important}
+html{scroll-behavior:smooth}
+div[data-testid="stFileUploader"] section{padding:14px 18px}
+div[data-testid="stExpander"]{background:var(--mist)}
 </style>
 """, unsafe_allow_html=True)
 
@@ -133,73 +147,6 @@ def secret_key() -> str:
         return ""
 
 
-with st.sidebar:
-    st.markdown("### Setup")
-    eyebrow("Model", "01")
-    w_up = st.file_uploader("Upload trained weights (.pth)", type=["pth", "pt"], key="w_up",
-                            help="best_densenet121.pth from your training notebook. Loaded in memory only.")
-    c_up = st.file_uploader("Calibration file (optional)", type=["json"], key="c_up",
-                            help="calibration_params.json - contains the temperature T.")
-
-    model, model_src, model_id, detected_T, T_src = None, "", "", DEFAULT_T, "default from training"
-    disk_w = HERE / "best_densenet121.pth"
-    try:
-        if w_up is not None:
-            wb = w_up.getvalue()
-            model_id = sha(wb)
-            model = _cached_uploaded_model(wb, model_id)
-            model_src = f"uploaded · {w_up.name}"
-        elif disk_w.exists():
-            model = _cached_disk_model(str(disk_w), disk_w.stat().st_mtime)
-            model_id = f"disk{int(disk_w.stat().st_mtime)}"
-            model_src = "local folder · best_densenet121.pth"
-    except ValueError as e:
-        st.error(str(e))
-    except Exception as e:
-        st.error(f"Could not load weights ({type(e).__name__}). Is this a PyTorch state_dict for DenseNet-121?")
-
-    if c_up is not None:
-        try:
-            detected_T = float(json.loads(c_up.getvalue())["temperature"])
-            T_src = "uploaded calibration file"
-        except Exception:
-            st.warning("Could not read a 'temperature' from that JSON; using the default.")
-    elif (HERE / "calibration_params.json").exists():
-        detected_T = read_temperature(str(HERE / "calibration_params.json"), DEFAULT_T)
-        T_src = "local calibration_params.json"
-    T = st.number_input("Calibration temperature T", 0.1, 10.0, float(detected_T), 0.001, format="%.3f",
-                        key=f"T_{T_src}_{detected_T}", help=f"Detected from: {T_src}. Confidence = softmax(logits / T).")
-
-    if model is not None:
-        st.markdown(f'<span class="pill ok">● Model ready</span> <span class="pill">{DEVICE.type.upper()}</span>',
-                    unsafe_allow_html=True)
-        st.caption(f"{model_src} · T = {T:.3f}")
-    else:
-        st.markdown('<span class="pill">○ No weights loaded</span>', unsafe_allow_html=True)
-
-    eyebrow("Gemini explanation", "02")
-    key_in = st.text_input("Gemini API key", type="password", placeholder="Paste key here (AIza...)",
-                           help="Used only for this session, held in memory, never written to disk or logs. "
-                                "The model receives numbers only - never your X-ray.")
-    eff_key = (key_in or "").strip() or secret_key()
-    if st.button("Test key", width="stretch"):
-        with st.spinner("Checking key..."):
-            ok, msg = test_gemini_key(eff_key)
-        st.session_state["key_test"] = (ok, msg)
-    kt = st.session_state.get("key_test")
-    if kt:
-        (st.success if kt[0] else st.error)(kt[1])
-    use_llm = st.toggle("Generate Gemini explanation", value=True)
-    st.caption("No key → a deterministic safe summary is shown instead.")
-
-    eyebrow("Options", "03")
-    run_occ = st.toggle("Occlusion baseline", value=DEVICE.type == "cuda",
-                        help="Slow on CPU (can exceed the 10 s target). Default ON only with a GPU.")
-
-    st.markdown('<div class="disc"><b>Educational research prototype.</b> Not a diagnostic device. Heatmaps show '
-                'model sensitivity, not verified pathology. The clinician keeps final decision authority.</div>',
-                unsafe_allow_html=True)
-
 # ----------------------------------------------------------------------------
 # Hero
 # ----------------------------------------------------------------------------
@@ -211,6 +158,107 @@ st.markdown("""
   Usefulness Score and a plain-language summary, on one screen.</p>
 </div>
 """, unsafe_allow_html=True)
+
+
+# ----------------------------------------------------------------------------
+# Setup (collapsed dropdown). Set HIDE_SETUP=1 to show it only with ?admin=1 in the URL.
+# ----------------------------------------------------------------------------
+def _flag(name: str) -> bool:
+    if os.environ.get(name) == "1":
+        return True
+    try:
+        return str(st.secrets.get(name, "")) == "1"
+    except Exception:
+        return False
+
+
+show_setup = (not _flag("HIDE_SETUP")) or st.query_params.get("admin") == "1"
+w_up = c_up = None
+key_in = ""
+use_llm = True
+run_occ = DEVICE.type == "cuda"
+detected_T, T_src, T = DEFAULT_T, "default from training", DEFAULT_T
+status_box = None
+
+if show_setup:
+    with st.expander("⚙  Setup · model weights & Gemini key (click to open)", expanded=False):
+        status_box = st.container()
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            eyebrow("Model", "01")
+            w_up = st.file_uploader("Upload trained weights (.pth)", type=["pth", "pt"], key="w_up",
+                                    help="best_densenet121.pth from your training notebook. Loaded in memory only.")
+            c_up = st.file_uploader("Calibration file (optional)", type=["json"], key="c_up",
+                                    help="calibration_params.json - contains the temperature T.")
+            T_slot = st.container()
+        with sc2:
+            eyebrow("Gemini explanation", "02")
+            key_in = st.text_input("Gemini API key", type="password", placeholder="Paste key here (AIza...)",
+                                   help="Used only for this session, held in memory, never written to disk or logs. "
+                                        "The model receives numbers only - never your X-ray.")
+            _eff = (key_in or "").strip() or secret_key()
+            if st.button("Test key"):
+                with st.spinner("Checking key..."):
+                    ok, msg = test_gemini_key(_eff)
+                st.session_state["key_test"] = (ok, msg)
+            kt = st.session_state.get("key_test")
+            if kt:
+                (st.success if kt[0] else st.error)(kt[1])
+            use_llm = st.toggle("Generate Gemini explanation", value=True)
+            st.caption("No key → a deterministic safe summary is shown instead.")
+            run_occ = st.toggle("Occlusion baseline", value=DEVICE.type == "cuda",
+                                help="Slow on CPU (can exceed the 10 s target). Default ON only with a GPU.")
+eff_key = (key_in or "").strip() or secret_key()
+
+# ---- resolve model + temperature ----
+model, model_src, model_id = None, "", ""
+disk_w = HERE / "best_densenet121.pth"
+load_err = None
+try:
+    if w_up is not None:
+        wb = w_up.getvalue()
+        model_id = sha(wb)
+        model = _cached_uploaded_model(wb, model_id)
+        model_src = f"uploaded · {w_up.name}"
+    elif disk_w.exists():
+        model = _cached_disk_model(str(disk_w), disk_w.stat().st_mtime)
+        model_id = f"disk{int(disk_w.stat().st_mtime)}"
+        model_src = "local folder · best_densenet121.pth"
+except ValueError as e:
+    load_err = str(e)
+except Exception as e:
+    load_err = f"Could not load weights ({type(e).__name__}). Is this a PyTorch state_dict for DenseNet-121?"
+
+if c_up is not None:
+    try:
+        detected_T = float(json.loads(c_up.getvalue())["temperature"])
+        T_src = "uploaded calibration file"
+    except Exception:
+        pass
+elif (HERE / "calibration_params.json").exists():
+    detected_T = read_temperature(str(HERE / "calibration_params.json"), DEFAULT_T)
+    T_src = "local calibration_params.json"
+T = float(detected_T)
+if show_setup:
+    with T_slot:
+        T = st.number_input("Calibration temperature T", 0.1, 10.0, float(detected_T), 0.001, format="%.3f",
+                            key=f"T_{T_src}_{detected_T}",
+                            help=f"Detected from: {T_src}. Confidence = softmax(logits / T).")
+    with status_box:
+        if load_err:
+            st.error(load_err)
+        if model is not None:
+            st.markdown(f'<span class="pill ok">● Model ready</span> <span class="pill">{DEVICE.type.upper()}</span> '
+                        f'<span class="pill">T = {T:.3f}</span>', unsafe_allow_html=True)
+            st.caption(model_src)
+        else:
+            st.markdown('<span class="pill">○ No weights loaded yet</span>', unsafe_allow_html=True)
+elif load_err:
+    st.error(load_err)
+
+st.markdown('<div class="disc"><b>Educational research prototype.</b> Not a diagnostic device. Heatmaps show '
+            'model sensitivity, not verified pathology. The clinician keeps final decision authority.</div>',
+            unsafe_allow_html=True)
 
 tab_analyze, tab_validate, tab_perf = st.tabs(["Analyze X-ray", "Clinician validation", "Model performance"])
 
@@ -256,128 +304,123 @@ def prob_bars(probs: dict, top: str):
 # Analyze tab
 # ----------------------------------------------------------------------------
 with tab_analyze:
+    eyebrow("Upload X-ray", "01")
+    up = st.file_uploader("Chest X-ray (JPG / PNG)", type=["jpg", "jpeg", "png"], key="xray",
+                          disabled=model is None, label_visibility="collapsed")
     if model is None:
-        st.markdown("""
-<div class="card"><div class="micro">Step 1</div><div class="mid">Load the trained model</div>
-<p class="sub">Upload <b>best_densenet121.pth</b> in the sidebar (and optionally <b>calibration_params.json</b>).
-Or place the files next to <code>app.py</code> and refresh. Add your Gemini key below it for the AI-written explanation.</p></div>
-""", unsafe_allow_html=True)
+        st.info("Open **⚙ Setup** above and load the model weights first. The upload box unlocks once the model is ready.")
+    elif up is None:
+        st.info("Upload a chest X-ray above to begin. Files are processed in memory and never saved.")
     else:
-        eyebrow("Upload", "01")
-        up = st.file_uploader("Chest X-ray (JPG / PNG)", type=["jpg", "jpeg", "png"], key="xray",
-                              label_visibility="collapsed")
-        if up is None:
-            st.info("Upload a chest X-ray to begin. Files are processed in memory and never saved.")
-        else:
-            img_bytes = up.getvalue()
-            case_id = sha(img_bytes, 8)
-            rkey = (case_id, model_id, round(T, 4), run_occ)
-            if st.session_state.get("rkey") != rkey:
-                res = None
-                try:
-                    with st.spinner("Running prediction + explanation..."):
-                        t0 = time.perf_counter()
-                        res = predict_and_explain(io.BytesIO(img_bytes), model, DEVICE, T, run_occlusion=run_occ)
-                        latency = time.perf_counter() - t0
-                except ValueError as e:
-                    st.error(str(e))
-                except Exception as e:
-                    st.error(f"Analysis failed ({type(e).__name__}). Try a different image.")
-                if res is not None:
-                    st.session_state.update(rkey=rkey, res=res, latency=latency, llm_key=None, llm_text=None)
-                    st.session_state["last"] = {
-                        "case_id": case_id, "fact": res["fact_class"], "foil": res["foil_class"],
-                        "confidence": res["confidence"], "us": res["usefulness"]["usefulness_score"],
-                        "us_norm": res["usefulness"]["usefulness_normalized"]}
-            if st.session_state.get("rkey") == rkey:
-                res, latency = st.session_state["res"], st.session_state["latency"]
-                u = res["usefulness"]
+        img_bytes = up.getvalue()
+        case_id = sha(img_bytes, 8)
+        rkey = (case_id, model_id, round(T, 4), run_occ)
+        if st.session_state.get("rkey") != rkey:
+            res = None
+            try:
+                with st.spinner("Running prediction + explanation..."):
+                    t0 = time.perf_counter()
+                    res = predict_and_explain(io.BytesIO(img_bytes), model, DEVICE, T, run_occlusion=run_occ)
+                    latency = time.perf_counter() - t0
+            except ValueError as e:
+                st.error(str(e))
+            except Exception as e:
+                st.error(f"Analysis failed ({type(e).__name__}). Try a different image.")
+            if res is not None:
+                st.session_state.update(rkey=rkey, res=res, latency=latency, llm_key=None, llm_text=None)
+                st.session_state["last"] = {
+                    "case_id": case_id, "fact": res["fact_class"], "foil": res["foil_class"],
+                    "confidence": res["confidence"], "us": res["usefulness"]["usefulness_score"],
+                    "us_norm": res["usefulness"]["usefulness_normalized"]}
+        if st.session_state.get("rkey") == rkey:
+            res, latency = st.session_state["res"], st.session_state["latency"]
+            u = res["usefulness"]
 
-                # --- headline cards -------------------------------------------------
-                eyebrow("Result", "02")
-                c1, c2, c3 = st.columns([1.15, 1, 1.15])
-                with c1:
-                    st.markdown(f"""<div class="card dark"><div class="micro">Diagnosis (model prediction)</div>
-    <div class="big">{res['fact_class'].capitalize()}</div>
-    <div class="sub">Calibrated confidence <b>{res['confidence']*100:.1f}%</b></div>
-    <div class="meter"><div style="width:{res['confidence']*100:.1f}%"></div></div></div>""", unsafe_allow_html=True)
-                with c2:
-                    st.markdown(f"""<div class="card"><div class="micro">Closest alternative (foil)</div>
-    <div class="mid">{res['foil_class'].capitalize()}</div>
-    <div class="sub">{res['foil_confidence']*100:.1f}% calibrated probability</div>
-    <div class="meter light"><div style="width:{res['foil_confidence']*100:.1f}%"></div></div></div>""", unsafe_allow_html=True)
-                with c3:
-                    st.markdown(f"""<div class="card lime"><div class="micro">Explanation usefulness score</div>
-    <div class="mid">{u['usefulness_normalized']:.2f} <span style="font-size:16px;opacity:.7">/ 1 &nbsp;·&nbsp; raw {u['usefulness_score']:+.2f}</span></div>
-    <div class="sub">{us_reading(u['usefulness_normalized'])}</div>
-    <div class="meter light"><div style="width:{u['usefulness_normalized']*100:.0f}%"></div></div></div>""", unsafe_allow_html=True)
+            # --- headline cards -------------------------------------------------
+            eyebrow("Result", "02")
+            c1, c2, c3 = st.columns([1.15, 1, 1.15])
+            with c1:
+                st.markdown(f"""<div class="card dark"><div class="micro">Diagnosis (model prediction)</div>
+<div class="big">{res['fact_class'].capitalize()}</div>
+<div class="sub">Calibrated confidence <b>{res['confidence']*100:.1f}%</b></div>
+<div class="meter"><div style="width:{res['confidence']*100:.1f}%"></div></div></div>""", unsafe_allow_html=True)
+            with c2:
+                st.markdown(f"""<div class="card"><div class="micro">Closest alternative (foil)</div>
+<div class="mid">{res['foil_class'].capitalize()}</div>
+<div class="sub">{res['foil_confidence']*100:.1f}% calibrated probability</div>
+<div class="meter light"><div style="width:{res['foil_confidence']*100:.1f}%"></div></div></div>""", unsafe_allow_html=True)
+            with c3:
+                st.markdown(f"""<div class="card lime"><div class="micro">Explanation usefulness score</div>
+<div class="mid">{u['usefulness_normalized']:.2f} <span style="font-size:16px;opacity:.7">/ 1 &nbsp;·&nbsp; raw {u['usefulness_score']:+.2f}</span></div>
+<div class="sub">{us_reading(u['usefulness_normalized'])}</div>
+<div class="meter light"><div style="width:{u['usefulness_normalized']*100:.0f}%"></div></div></div>""", unsafe_allow_html=True)
 
-                banners(res)
+            banners(res)
 
-                # --- images side by side -------------------------------------------
-                eyebrow("Original vs heatmap", "03")
-                cols = st.columns(3 if res["occlusion_overlay"] is not None else 2)
-                cols[0].image(res["original_image"], caption="Original X-ray", width="stretch")
-                cols[1].image(res["overlay"], caption="Grad-CAM overlay (model sensitivity)", width="stretch")
-                if res["occlusion_overlay"] is not None:
-                    cols[2].image(res["occlusion_overlay"], caption="Occlusion baseline", width="stretch")
+            # --- images side by side -------------------------------------------
+            eyebrow("Original vs heatmap", "03")
+            cols = st.columns(3 if res["occlusion_overlay"] is not None else 2)
+            cols[0].image(res["original_image"], caption="Original X-ray", width="stretch")
+            cols[1].image(res["overlay"], caption="Grad-CAM overlay (model sensitivity)", width="stretch")
+            if res["occlusion_overlay"] is not None:
+                cols[2].image(res["occlusion_overlay"], caption="Occlusion baseline", width="stretch")
 
-                with st.expander("How to read this"):
-                    st.markdown(
-                        "- **Heatmap** = where the model was *sensitive*, not verified pathology. Warm colours mean more influence on the prediction.\n"
-                        "- **Confidence** is a temperature-calibrated statistical estimate, not the probability that the patient has the disease.\n"
-                        "- **Usefulness score** here is a *prototype*: it depends only on the (predicted class, closest alternative) pair "
-                        "and a transparent hand-written concept table (λ = 0.15, US = CS − λ·C). "
-                        "It does **not** change with the image or the heatmap, so do not read it as image-specific clinical truth.\n"
-                        "- **Accuracy context:** measured test accuracy is 73.69% (below the 85% target). Pneumonia is reliable; "
-                        "Normal ↔ Tuberculosis is often confused.\n"
-                        "- The clinician keeps final decision authority.")
+            with st.expander("How to read this"):
+                st.markdown(
+                    "- **Heatmap** = where the model was *sensitive*, not verified pathology. Warm colours mean more influence on the prediction.\n"
+                    "- **Confidence** is a temperature-calibrated statistical estimate, not the probability that the patient has the disease.\n"
+                    "- **Usefulness score** here is a *prototype*: it depends only on the (predicted class, closest alternative) pair "
+                    "and a transparent hand-written concept table (λ = 0.15, US = CS − λ·C). "
+                    "It does **not** change with the image or the heatmap, so do not read it as image-specific clinical truth.\n"
+                    "- **Accuracy context:** measured test accuracy is 73.69% (below the 85% target). Pneumonia is reliable; "
+                    "Normal ↔ Tuberculosis is often confused.\n"
+                    "- The clinician keeps final decision authority.")
 
-                # --- probabilities + faithfulness ----------------------------------
-                eyebrow("Probabilities & faithfulness", "04")
-                p1, p2 = st.columns(2)
-                with p1:
-                    with st.container(border=True):
-                        st.markdown("**Class probabilities** (temperature-calibrated)")
-                        prob_bars(res["all_probabilities"], res["fact_class"])
-                with p2:
-                    with st.container(border=True):
-                        st.markdown("**Faithfulness** · probability drop after deleting the top-k% attributed pixels")
-                        fdf = pd.DataFrame({"Grad-CAM": res["gradcam_drops"]}, index=["10%", "20%", "30%"])
-                        if res["occlusion_drops"] is not None:
-                            fdf["Occlusion"] = res["occlusion_drops"]
-                        st.dataframe(fdf.style.format("{:.3f}"), width="stretch")
-                with st.expander("Usefulness score breakdown"):
-                    st.write(f"CS = {u['contrastive_score']} | penalty λ·C = {u['complexity_penalty']} | US = {u['usefulness_score']}")
-                    st.dataframe(pd.DataFrame(u["concept_breakdown"]).T, width="stretch")
-
-                # --- explanation ----------------------------------------------------
-                eyebrow("Explanation", "05")
-                lkey = (rkey, use_llm, hashlib.sha256(eff_key.encode()).hexdigest() if eff_key else "")
-                if st.session_state.get("llm_key") != lkey:
-                    t1 = time.perf_counter()
-                    if use_llm:
-                        with st.spinner("Generating explanation..."):
-                            text = generate_llm_explanation(res, eff_key or None)
-                    else:
-                        text = _fallback_summary(res)
-                    st.session_state.update(llm_key=lkey, llm_text=text, llm_time=time.perf_counter() - t1)
-                text = st.session_state["llm_text"]
+            # --- probabilities + faithfulness ----------------------------------
+            eyebrow("Probabilities & faithfulness", "04")
+            p1, p2 = st.columns(2)
+            with p1:
                 with st.container(border=True):
-                    st.markdown(text)
+                    st.markdown("**Class probabilities** (temperature-calibrated)")
+                    prob_bars(res["all_probabilities"], res["fact_class"])
+            with p2:
+                with st.container(border=True):
+                    st.markdown("**Faithfulness** · probability drop after deleting the top-k% attributed pixels")
+                    fdf = pd.DataFrame({"Grad-CAM": res["gradcam_drops"]}, index=["10%", "20%", "30%"])
+                    if res["occlusion_drops"] is not None:
+                        fdf["Occlusion"] = res["occlusion_drops"]
+                    st.dataframe(fdf.style.format("{:.3f}"), width="stretch")
+            with st.expander("Usefulness score breakdown"):
+                st.write(f"CS = {u['contrastive_score']} | penalty λ·C = {u['complexity_penalty']} | US = {u['usefulness_score']}")
+                st.dataframe(pd.DataFrame(u["concept_breakdown"]).T, width="stretch")
 
-                # --- footer: latency + report --------------------------------------
-                total = latency
-                ok = "within" if total <= GOOD_LATENCY_S else "above"
-                st.caption(f"Prediction + explanation took {latency:.1f} s on {DEVICE.type.upper()} "
-                           f"({ok} the 10 s target)" + ("" if run_occ else " · occlusion off") +
-                           f" · LLM text {st.session_state.get('llm_time', 0):.1f} s · case ref {case_id}")
-                try:
-                    pdf = report.build_pdf(res, text, case_id, latency)
-                    st.download_button("Download PDF report", pdf, file_name=f"xai_report_{case_id}.pdf",
-                                       mime="application/pdf")
-                except Exception as e:
-                    st.caption(f"PDF report unavailable ({type(e).__name__}).")
+            # --- explanation ----------------------------------------------------
+            eyebrow("Explanation", "05")
+            lkey = (rkey, use_llm, hashlib.sha256(eff_key.encode()).hexdigest() if eff_key else "")
+            if st.session_state.get("llm_key") != lkey:
+                t1 = time.perf_counter()
+                if use_llm:
+                    with st.spinner("Generating explanation..."):
+                        text = generate_llm_explanation(res, eff_key or None)
+                else:
+                    text = _fallback_summary(res)
+                st.session_state.update(llm_key=lkey, llm_text=text, llm_time=time.perf_counter() - t1)
+            text = st.session_state["llm_text"]
+            with st.container(border=True):
+                st.markdown(text)
+
+            # --- footer: latency + report --------------------------------------
+            total = latency
+            ok = "within" if total <= GOOD_LATENCY_S else "above"
+            st.caption(f"Prediction + explanation took {latency:.1f} s on {DEVICE.type.upper()} "
+                       f"({ok} the 10 s target)" + ("" if run_occ else " · occlusion off") +
+                       f" · LLM text {st.session_state.get('llm_time', 0):.1f} s · case ref {case_id}")
+            try:
+                pdf = report.build_pdf(res, text, case_id, latency)
+                st.download_button("Download PDF report", pdf, file_name=f"xai_report_{case_id}.pdf",
+                                   mime="application/pdf")
+            except Exception as e:
+                st.caption(f"PDF report unavailable ({type(e).__name__}).")
 
 
 # ----------------------------------------------------------------------------
