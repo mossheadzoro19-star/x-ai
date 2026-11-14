@@ -4,7 +4,6 @@ Clinician-facing XAI dashboard (Streamlit) - Team 19, KLE Tech.
 Run:  pip install -r requirements.txt   then   streamlit run app.py
 
 Model weights: upload best_densenet121.pth in the sidebar (or place it next to app.py).
-Gemini key:    paste it in the sidebar (or set GEMINI_API_KEY / .streamlit/secrets.toml).
 Nothing is written to disk except the clinician-ratings CSV (no images, no keys).
 Research prototype - not a diagnostic device.
 """
@@ -187,13 +186,6 @@ def _download_checkpoint(url: str, expected_sha256: str = "", github_token: str 
     return str(target)
 
 
-def secret_key() -> str:
-    try:
-        return str(st.secrets.get("GEMINI_API_KEY", "") or st.secrets.get("GOOGLE_API_KEY", ""))
-    except Exception:
-        return ""
-
-
 # ----------------------------------------------------------------------------
 # Hero
 # ----------------------------------------------------------------------------
@@ -225,7 +217,7 @@ detected_T, T_src, T = DEFAULT_T, "default from training", DEFAULT_T
 status_box = None
 
 if show_setup:
-    with st.expander("⚙  Setup · model weights & Gemini key (click to open)", expanded=False):
+    with st.expander("⚙  Setup · model weights (click to open)", expanded=False):
         status_box = st.container()
         with st.container():
             eyebrow("Model", "01")
@@ -376,7 +368,7 @@ with tab_analyze:
             except Exception as e:
                 st.error(f"Analysis failed ({type(e).__name__}). Try a different image.")
             if res is not None:
-                st.session_state.update(rkey=rkey, res=res, latency=latency, llm_key=None, llm_text=None)
+                st.session_state.update(rkey=rkey, res=res, latency=latency)
                 st.session_state["last"] = {
                     "case_id": case_id, "fact": res["fact_class"], "foil": res["foil_class"],
                     "confidence": res["confidence"], "us": res["usefulness"]["usefulness_score"],
