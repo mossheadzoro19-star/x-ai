@@ -410,14 +410,14 @@ with tab_analyze:
             eyebrow("Result", "02")
             c1, c2, c3 = st.columns([1.15, 1, 1.15])
             with c1:
-                st.markdown(f"""<div class="card dark"><div class="micro">Diagnosis (model prediction)</div>
+                st.markdown(f"""<div class="card dark"><div class="micro">AI prediction</div>
 <div class="big">{res['fact_class'].capitalize()}</div>
-<div class="sub">Calibrated confidence <b>{res['confidence']*100:.1f}%</b></div>
+<div class="sub">Model score <b>{res['confidence']*100:.1f}%</b></div>
 <div class="meter"><div style="width:{res['confidence']*100:.1f}%"></div></div></div>""", unsafe_allow_html=True)
             with c2:
                 st.markdown(f"""<div class="card"><div class="micro">Closest alternative (foil)</div>
 <div class="mid">{res['foil_class'].capitalize()}</div>
-<div class="sub">{res['foil_confidence']*100:.1f}% calibrated probability</div>
+<div class="sub">{res['foil_confidence']*100:.1f}% model score</div>
 <div class="meter light"><div style="width:{res['foil_confidence']*100:.1f}%"></div></div></div>""", unsafe_allow_html=True)
             with c3:
                 st.markdown(f"""<div class="card lime"><div class="micro">Explanation usefulness score</div>
@@ -451,11 +451,11 @@ with tab_analyze:
             p1, p2 = st.columns(2)
             with p1:
                 with st.container(border=True):
-                    st.markdown("**Class probabilities** (temperature-calibrated)")
+                    st.markdown("**Model class scores** (temperature-calibrated)")
                     prob_bars(res["all_probabilities"], res["fact_class"])
             with p2:
                 with st.container(border=True):
-                    st.markdown("**Faithfulness** · probability drop after deleting the top-k% attributed pixels")
+                    st.markdown("**Explanation faithfulness test** · model-score change after masking highlighted pixels")
                     fdf = pd.DataFrame({"Grad-CAM": res["gradcam_drops"]}, index=["10%", "20%", "30%"])
                     if res["occlusion_drops"] is not None:
                         fdf["Occlusion"] = res["occlusion_drops"]
@@ -464,13 +464,13 @@ with tab_analyze:
                 st.write(f"CS = {u['contrastive_score']} | penalty λ·C = {u['complexity_penalty']} | US = {u['usefulness_score']}")
                 st.dataframe(pd.DataFrame(u["concept_breakdown"]).T, width="stretch")
 
-            # --- explanation ----------------------------------------------------
-            eyebrow("Explanation", "05")
+            # --- clinician-first explanation -----------------------------------
+            eyebrow("Clinical explanation", "05")
             lkey = (rkey, use_llm, hashlib.sha256(eff_key.encode()).hexdigest() if eff_key else "")
             if st.session_state.get("llm_key") != lkey:
                 t1 = time.perf_counter()
                 if use_llm:
-                    with st.spinner("Generating explanation..."):
+                    with st.spinner("Preparing clinician-friendly explanation..."):
                         text = generate_llm_explanation(res, eff_key or None)
                 else:
                     text = _fallback_summary(res)
@@ -478,6 +478,31 @@ with tab_analyze:
             text = st.session_state["llm_text"]
             with st.container(border=True):
                 st.markdown(text)
+            with st.expander("Technical details for researchers"):
+                st.markdown("**Model output**")
+                st.write(f"Architecture: DenseNet-121 · Predicted category: {res['fact_class'].capitalize()} · "
+                         f"Closest alternative: {res['foil_class'].capitalize()}")
+                st.write(f"Calibrated model score: {res['confidence']*100:.2f}% · "
+                         f"Closest-alternative score: {res['foil_confidence']*100:.2f}%")
+                st.caption("These are model scores, not patient-level disease probabilities.")
+                st.markdown("**Class scores**")
+                prob_bars(res["all_probabilities"], res["fact_class"])
+                st.markdown("**Attribution and faithfulness**")
+                st.write("Grad-CAM highlights regions that influenced the selected class. Deletion faithfulness "
+                         "measures how the model score changes when the most-highlighted pixels are removed. "
+                         "Neither verifies pathology.")
+                tech_rows = {"Grad-CAM deletion drop": res["gradcam_drops"]}
+                if res["occlusion_drops"] is not None:
+                    tech_rows["Occlusion deletion drop"] = res["occlusion_drops"]
+                st.dataframe(pd.DataFrame(tech_rows, index=["Top 10%", "Top 20%", "Top 30%"]).style.format("{:.4f}"),
+                             width="stretch")
+                st.markdown("**Prototype concept-table calculation**")
+                st.caption("Hand-authored class associations; not findings detected in this X-ray.")
+                st.write(f"Contrastive score: {u['contrastive_score']:+.3f} · "
+                         f"Complexity penalty: {u['complexity_penalty']:.3f} · "
+                         f"Usefulness score: {u['usefulness_score']:+.3f} · "
+                         f"Normalised: {u['usefulness_normalized']:.3f}")
+                st.dataframe(pd.DataFrame(u["concept_breakdown"]).T, width="stretch")
 
             # --- footer: latency + report --------------------------------------
             total = latency
