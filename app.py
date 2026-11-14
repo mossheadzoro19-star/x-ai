@@ -22,8 +22,8 @@ import pandas as pd
 import streamlit as st
 import torch
 
-from xai_core import (CLASS_NAMES, generate_llm_explanation, load_model_from_bytes, load_model,
-                      predict_and_explain, read_temperature, test_gemini_key, _fallback_summary)
+from xai_core import (CLASS_NAMES, load_model_from_bytes, load_model,
+                      predict_and_explain, read_temperature)
 import report
 
 HERE = Path(__file__).parent
@@ -38,7 +38,7 @@ LOW_CONF = 0.70            # below this -> low-confidence warning
 CLOSE_GAP = 0.20           # top-2 probability gap below this -> "uncertain" banner
 GOOD_LATENCY_S = 10.0      # NFR2
 
-st.set_page_config(page_title="Chest X-ray XAI · Team 19", page_icon="🫁", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="x-ai", page_icon="🫁", layout="wide", initial_sidebar_state="collapsed")
 
 # ----------------------------------------------------------------------------
 # Design (Olea-style: Hanken Grotesk, forest + lime, soft rounded cards)
@@ -199,10 +199,9 @@ def secret_key() -> str:
 # ----------------------------------------------------------------------------
 st.markdown("""
 <div class="hero">
-  <div class="badge"><span class="dot"></span>Research prototype · Team 19 · KLE Tech</div>
-  <h1>AI support that shows its confidence, and its reasoning.</h1>
-  <p>Upload a chest X-ray to see the predicted class, calibrated confidence, a Grad-CAM heatmap, an Explanation
-  Usefulness Score and a plain-language summary, on one screen.</p>
+  <div class="badge"><span class="dot"></span>x-ai</div>
+  <h1>Chest X-ray analysis</h1>
+  <p>Explore the model prediction, confidence scores and visual explanations for a chest X-ray.</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -221,8 +220,6 @@ def _flag(name: str) -> bool:
 
 show_setup = st.query_params.get("admin") == "1"
 w_up = c_up = None
-key_in = ""
-use_llm = True
 run_occ = DEVICE.type == "cuda"
 detected_T, T_src, T = DEFAULT_T, "default from training", DEFAULT_T
 status_box = None
@@ -230,33 +227,15 @@ status_box = None
 if show_setup:
     with st.expander("⚙  Setup · model weights & Gemini key (click to open)", expanded=False):
         status_box = st.container()
-        sc1, sc2 = st.columns(2)
-        with sc1:
+        with st.container():
             eyebrow("Model", "01")
             w_up = st.file_uploader("Upload trained weights (.pth)", type=["pth", "pt"], key="w_up",
                                     help="best_densenet121.pth from your training notebook. Loaded in memory only.")
             c_up = st.file_uploader("Calibration file (optional)", type=["json"], key="c_up",
                                     help="calibration_params.json - contains the temperature T.")
             T_slot = st.container()
-        with sc2:
-            eyebrow("Gemini explanation", "02")
-            key_in = st.text_input("Gemini API key", type="password", placeholder="Paste key here (AIza...)",
-                                   help="Used only for this session, held in memory, never written to disk or logs. "
-                                        "The model receives numbers only - never your X-ray.")
-            _eff = (key_in or "").strip() or secret_key()
-            if st.button("Test key"):
-                with st.spinner("Checking key..."):
-                    ok, msg = test_gemini_key(_eff)
-                st.session_state["key_test"] = (ok, msg)
-            kt = st.session_state.get("key_test")
-            if kt:
-                (st.success if kt[0] else st.error)(kt[1])
-            use_llm = st.toggle("Generate Gemini explanation", value=True)
-            st.caption("No key → a deterministic safe summary is shown instead.")
-            run_occ = st.toggle("Occlusion baseline", value=DEVICE.type == "cuda",
-                                help="Slow on CPU (can exceed the 10 s target). Default ON only with a GPU.")
-eff_key = (key_in or "").strip() or secret_key()
-
+        run_occ = st.toggle("Occlusion baseline", value=DEVICE.type == "cuda",
+                            help="Slow on CPU (can exceed the 10 s target). Default ON only with a GPU.")
 # ---- resolve model + temperature ----
 model, model_src, model_id = None, "", ""
 disk_w = HERE / "best_densenet121.pth"
@@ -464,54 +443,16 @@ with tab_analyze:
                 st.write(f"CS = {u['contrastive_score']} | penalty λ·C = {u['complexity_penalty']} | US = {u['usefulness_score']}")
                 st.dataframe(pd.DataFrame(u["concept_breakdown"]).T, width="stretch")
 
-            # --- clinician-first explanation -----------------------------------
-            eyebrow("Clinical explanation", "05")
-            lkey = (rkey, use_llm, hashlib.sha256(eff_key.encode()).hexdigest() if eff_key else "")
-            if st.session_state.get("llm_key") != lkey:
-                t1 = time.perf_counter()
-                if use_llm:
-                    with st.spinner("Preparing clinician-friendly explanation..."):
-                        text = generate_llm_explanation(res, eff_key or None)
-                else:
-                    text = _fallback_summary(res)
-                st.session_state.update(llm_key=lkey, llm_text=text, llm_time=time.perf_counter() - t1)
-            text = st.session_state["llm_text"]
-            with st.container(border=True):
-                st.markdown(text)
-            with st.expander("Technical details for researchers"):
-                st.markdown("**Model output**")
-                st.write(f"Architecture: DenseNet-121 · Predicted category: {res['fact_class'].capitalize()} · "
-                         f"Closest alternative: {res['foil_class'].capitalize()}")
-                st.write(f"Calibrated model score: {res['confidence']*100:.2f}% · "
-                         f"Closest-alternative score: {res['foil_confidence']*100:.2f}%")
-                st.caption("These are model scores, not patient-level disease probabilities.")
-                st.markdown("**Class scores**")
-                prob_bars(res["all_probabilities"], res["fact_class"])
-                st.markdown("**Attribution and faithfulness**")
-                st.write("Grad-CAM highlights regions that influenced the selected class. Deletion faithfulness "
-                         "measures how the model score changes when the most-highlighted pixels are removed. "
-                         "Neither verifies pathology.")
-                tech_rows = {"Grad-CAM deletion drop": res["gradcam_drops"]}
-                if res["occlusion_drops"] is not None:
-                    tech_rows["Occlusion deletion drop"] = res["occlusion_drops"]
-                st.dataframe(pd.DataFrame(tech_rows, index=["Top 10%", "Top 20%", "Top 30%"]).style.format("{:.4f}"),
-                             width="stretch")
-                st.markdown("**Prototype concept-table calculation**")
-                st.caption("Hand-authored class associations; not findings detected in this X-ray.")
-                st.write(f"Contrastive score: {u['contrastive_score']:+.3f} · "
-                         f"Complexity penalty: {u['complexity_penalty']:.3f} · "
-                         f"Usefulness score: {u['usefulness_score']:+.3f} · "
-                         f"Normalised: {u['usefulness_normalized']:.3f}")
-                st.dataframe(pd.DataFrame(u["concept_breakdown"]).T, width="stretch")
+
 
             # --- footer: latency + report --------------------------------------
             total = latency
             ok = "within" if total <= GOOD_LATENCY_S else "above"
-            st.caption(f"Prediction + explanation took {latency:.1f} s on {DEVICE.type.upper()} "
+            st.caption(f"Prediction + visual analysis took {latency:.1f} s on {DEVICE.type.upper()} "
                        f"({ok} the 10 s target)" + ("" if run_occ else " · occlusion off") +
-                       f" · LLM text {st.session_state.get('llm_time', 0):.1f} s · case ref {case_id}")
+                       f" · case ref {case_id}")
             try:
-                pdf = report.build_pdf(res, text, case_id, latency)
+                pdf = report.build_pdf(res, "", case_id, latency)
                 st.download_button("Download PDF report", pdf, file_name=f"xai_report_{case_id}.pdf",
                                    mime="application/pdf")
             except Exception as e:
