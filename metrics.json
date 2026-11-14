@@ -1,0 +1,71 @@
+{
+  "accuracy": 1,
+  "macro_f1": 1,
+  "weighted_f1": 1,
+  "ovr_roc_auc": 1,
+  "ece_uncalibrated": 0.00019466876983642578,
+  "ece_calibrated": 0.0014691583580809387,
+  "temperature": 1.4974132776260376,
+  "epochs_trained": 20,
+  "best_epoch": 14,
+  "best_val_loss": 0.0006772429413497123,
+  "test_size": 2157,
+  "dataset": "cleaned: conflicts+duplicates removed, leak-free re-split",
+  "split_sizes": {
+    "train": 10061,
+    "val": 2156,
+    "test": 2157
+  },
+  "class_split_counts": {
+    "train": {
+      "normal": 2450,
+      "pneumonia": 2971,
+      "tuberculosis": 4640
+    },
+    "val": {
+      "normal": 525,
+      "pneumonia": 637,
+      "tuberculosis": 994
+    },
+    "test": {
+      "normal": 525,
+      "pneumonia": 637,
+      "tuberculosis": 995
+    }
+  },
+  "metadata_shortcut_accuracy": 0.9976819656930923,
+  "per_class": {
+    "normal": {
+      "sensitivity": 1,
+      "specificity": 1,
+      "f1": 1
+    },
+    "pneumonia": {
+      "sensitivity": 1,
+      "specificity": 1,
+      "f1": 1
+    },
+    "tuberculosis": {
+      "sensitivity": 1,
+      "specificity": 1,
+      "f1": 1
+    }
+  },
+  "confusion_matrix": [
+    [
+      525,
+      0,
+      0
+    ],
+    [
+      0,
+      637,
+      0
+    ],
+    [
+      0,
+      0,
+      995
+    ]
+  ]
+}
