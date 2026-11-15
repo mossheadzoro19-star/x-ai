@@ -1,4 +1,4 @@
-# Chest X-ray XAI Dashboard (Team 19, KLE Tech)
+# Chest X-ray XAI 
 
 Upload a chest X-ray and get, on one screen: predicted class, calibrated confidence, Grad-CAM heatmap beside the
 original, Explanation Usefulness Score (raw + 0-1), and a guard-railed Gemini explanation. Plus a clinician-validation
