@@ -377,29 +377,27 @@ def generate_llm_explanation(prediction_results: Dict, api_key: Optional[str] = 
         client = genai.Client(api_key=key, http_options=http_options)
         prompt = f"""
 You write the clinician-facing explanation for a chest X-ray AI research dashboard.
-Write for a busy doctor in plain, concise clinical language. A doctor should understand the output in about 10 seconds.
-You may explain only what the supplied model outputs support. Do not interpret the X-ray yourself and do not invent radiological signs, anatomical locations, symptoms, patient history, or disease evidence.
+Write for a busy doctor in concise, medically literate language.
+Do not independently interpret the X-ray or invent findings, anatomical locations, symptoms, history, or disease evidence.
 
 Model outputs:
 - Leading model category: {fact}; calibrated model score: {conf:.1f}%
 - Closest alternative category: {foil}; calibrated model score: {foil_conf:.1f}%
 - Contrastive score: {us_d['contrastive_score']:.2f}; prototype usefulness score: {us_d['usefulness_score']:.2f}
-- Concept-table entries (hand-authored associations, not image-detected findings): {concepts}
+- Prototype concept-table associations (hand-authored class associations, NOT findings detected in this image): {concepts}
 - Grad-CAM deletion probability changes after removing top 10/20/30% highlighted pixels: {drops_txt}
 
-Write exactly these short sections:
-1. "AI assessment" — state which category the model favoured and the closest alternative.
-2. "What influenced the prediction" — explain that the heatmap highlights image regions that influenced the model; do not describe those regions as lesions, consolidation, cavities, infiltrates, or any other pathology.
-3. "Uncertainty" — explain that the score is a model score, not the probability that the patient has the disease. If the leading score is below 70% or the two leading scores are within 10 percentage points, explicitly call the result uncertain.
-4. "For clinical review" — ask the clinician to inspect the original image independently and correlate with clinical history and other investigations.
+Write these sections:
+1. "AI assessment" — state the leading category and closest alternative with their model scores.
+2. "Model-associated concepts" — include the most relevant 2–3 named concepts from the supplied concept table (for example, apical cavitation, airspace consolidation, or pleural effusion) and explain which class each concept is associated with. CRITICAL: explicitly say these are hand-authored prototype associations used in the contrastive calculation; the model has NOT detected or confirmed these findings in the X-ray. Do not say "the image shows", "the model found", or imply these abnormalities are present.
+3. "Heatmap and faithfulness" — explain that Grad-CAM shows regions influencing the model, not pathology; briefly report the supplied deletion changes if useful.
+4. "Uncertainty and clinical review" — explain that scores are model scores, not disease probabilities; call the result uncertain if the leading score is below 70% or the top-two gap is below 10 percentage points. Ask the clinician to inspect the original image and correlate clinically.
 
 Rules:
-- Maximum 120 words total.
-- Plain language, short sentences, no ML jargon, no markdown tables.
+- Maximum 150 words total.
+- Use the exact concept names supplied; do not add new radiological terms.
+- Keep concept-table associations clearly separate from image observations.
 - Never state or imply a diagnosis or verified radiological finding.
-- Clearly say the heatmap reflects model sensitivity, not confirmed pathology.
-- The concept table is hand-authored and must never be presented as image evidence.
-- Do not call the confidence score a disease probability.
 - Physician/radiologist retains final decision authority.
 """
         resp = client.models.generate_content(model=model_name, contents=prompt)
