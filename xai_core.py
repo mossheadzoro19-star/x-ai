@@ -406,7 +406,7 @@ Rules:
         text = (resp.text or "").strip()
         if not text:
             raise RuntimeError("empty response")
-        return "### AI-generated explanation (Gemini)\n\n" + text + \
+        return "### x-ai\n\n" + text + \
                "\n\n⚠️ *Research prototype - not a diagnosis. Physician review required.*"
     except Exception as e:
         return _fallback_summary(prediction_results,
