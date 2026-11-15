@@ -21,7 +21,7 @@ import pandas as pd
 import streamlit as st
 import torch
 
-from xai_core import (CLASS_NAMES, load_model_from_bytes, load_model,
+from xai_core import (CLASS_NAMES, generate_llm_explanation, load_model_from_bytes, load_model,
                       predict_and_explain, read_temperature)
 import report
 
@@ -157,6 +157,17 @@ def _cached_disk_model(path: str, mtime: float):
 
 def sha(b: bytes, n: int = 10) -> str:
     return hashlib.sha256(b).hexdigest()[:n]
+
+
+def secret_key() -> str:
+    """Read the Gemini key from Streamlit secrets or environment; never hard-code it."""
+    try:
+        value = st.secrets.get("GEMINI_API_KEY", "") or st.secrets.get("GOOGLE_API_KEY", "")
+        if value:
+            return str(value).strip()
+    except Exception:
+        pass
+    return os.environ.get("GEMINI_API_KEY", "") or os.environ.get("GOOGLE_API_KEY", "")
 
 
 @st.cache_resource(show_spinner="Downloading model checkpoint...")
@@ -434,6 +445,20 @@ with tab_analyze:
             with st.expander("Usefulness score breakdown"):
                 st.write(f"CS = {u['contrastive_score']} | penalty λ·C = {u['complexity_penalty']} | US = {u['usefulness_score']}")
                 st.dataframe(pd.DataFrame(u["concept_breakdown"]).T, width="stretch")
+
+
+
+            # --- optional Gemini explanation ------------------------------------
+            eyebrow("x-ai explanation", "05")
+            api_key = secret_key()
+            explanation_key = (rkey, hashlib.sha256(api_key.encode()).hexdigest() if api_key else "no-key")
+            if st.session_state.get("explanation_key") != explanation_key:
+                with st.spinner("Preparing the x-ai explanation..."):
+                    explanation = generate_llm_explanation(res, api_key or None)
+                st.session_state.update(explanation_key=explanation_key, explanation_text=explanation)
+            st.markdown(st.session_state["explanation_text"])
+            if not api_key:
+                st.caption("Gemini is not configured. Showing the built-in explanation. Add GEMINI_API_KEY to Streamlit secrets to enable Gemini.")
 
 
 
