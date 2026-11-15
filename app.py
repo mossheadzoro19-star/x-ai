@@ -337,10 +337,6 @@ def banners(res):
         st.markdown(f'<div class="banner note"><b>Performance caution for {fact.capitalize()}.</b> '
                     f'Recorded test recall for this class is {recall_pct:.1f}%. This is a model-level evaluation '
                     f'metric, not a guarantee for this individual prediction.</div>', unsafe_allow_html=True)
-    if MODEL_METRICS.get("metadata_shortcut_accuracy") is not None and float(MODEL_METRICS["metadata_shortcut_accuracy"]) >= 0.90:
-        st.markdown('<div class="banner warn"><b>Evaluation warning.</b> A metadata-only baseline predicts the test labels '
-                    'with very high accuracy. The reported model accuracy may reflect dataset/source shortcuts; '
-                    'independent external validation is required.</div>', unsafe_allow_html=True)
 
 
 def prob_bars(probs: dict, top: str):
