@@ -1,4 +1,3 @@
 .streamlit/secrets.toml
 clinician_ratings.csv
-*.pth
 __pycache__/
